@@ -16,7 +16,7 @@ A pipeline that ingests candidate information from multiple sources (CSV recruit
 
 ```bash
 # Clone the repo
-git clone <https://github.com/sj9284/candidate-transformer>
+git clone https://github.com/sj9284/candidate-transformer.git
 cd candidate-transformer
 
 # Create and activate virtual environment
