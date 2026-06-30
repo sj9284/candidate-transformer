@@ -1,4 +1,4 @@
-# Multi-Source Candidate Data Transformer
+# Candidate Data Transformer
 
 
 
@@ -16,7 +16,7 @@ A pipeline that ingests candidate information from multiple sources (CSV recruit
 
 ```bash
 # Clone the repo
-git clone <repo-url>
+git clone <https://github.com/sj9284/candidate-transformer>
 cd candidate-transformer
 
 # Create and activate virtual environment
