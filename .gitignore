@@ -14,8 +14,10 @@ venv/
 env/
 
 # Output (runtime generated)
-# Removed input/ and output/ from gitignore because the assignment requires them in the repo
-
+input/*
+!input/.gitkeep
+output/*
+!output/.gitkeep
 # IDE
 .vscode/
 .idea/
