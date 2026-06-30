@@ -83,6 +83,8 @@ class Education(BaseModel):
     institution: str | None = None
     degree: str | None = None       # e.g. "B.S.", "M.S.", "Ph.D."
     field: str | None = None        # e.g. "Computer Science"
+    cgpa: str | None = None
+    start_year: int | None = None
     end_year: int | None = None     # graduation year
 
     model_config = {"extra": "ignore"}
@@ -109,8 +111,10 @@ class ProvenanceEntry(BaseModel):
     """
 
     field: str       # canonical field name, e.g. "full_name", "emails"
+    value: Any | None = None
     source: str      # source filename, e.g. "recruiter.csv", "resume.pdf"
     method: str      # one of the values listed above
+    confidence: float | None = None
 
     model_config = {"extra": "ignore"}
 

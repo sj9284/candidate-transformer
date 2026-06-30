@@ -88,8 +88,8 @@ LINK_FIELDS = {"linkedin", "github", "portfolio"}
 # Provenance helpers
 # ---------------------------------------------------------------------------
 
-def _prov(field: str, source: str, method: str) -> dict[str, str]:
-    return {"field": field, "source": source, "method": method}
+def _prov(field: str, value: Any, source: str, method: str) -> dict[str, Any]:
+    return {"field": field, "value": value, "source": source, "method": method}
 
 
 def _method_for_source(source: str) -> str:
@@ -102,17 +102,20 @@ def _method_for_source(source: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _merge_list_field(
-    field: str,
-    dicts: list[dict],
-    provenance: list[dict],
-) -> list[Any]:
+    field: str, dicts: list[dict], provenance: list[dict]
+) -> tuple[list, dict[str, list[str]]]:
     """
-    Union all values of a list field across dicts. Deduplicate by value.
-    Logs one provenance entry for the whole union.
+    Merge list fields across dicts, preserving order and removing duplicates.
+    Case-insensitive deduplication for strings.
+
+    Returns:
+        (merged_list, dict mapping each value to a list of source filenames)
     """
-    seen: set = set()
+    seen: set[str] = set()
     result: list = []
-    sources_used: list[str] = []
+    
+    # Mapping of value -> list of sources that provided it
+    val_to_sources: dict[str, list[str]] = {}
 
     for d in dicts:
         values = d.get(field, []) or []
@@ -122,18 +125,35 @@ def _merge_list_field(
         for v in values:
             if v is None:
                 continue
-            key = v if not isinstance(v, dict) else str(sorted(v.items()))
+            key = str(v).lower() if isinstance(v, str) else str(v)
+            val_to_sources.setdefault(v, []).append(src)
+            
             if key not in seen:
                 seen.add(key)
                 result.append(v)
-                if src not in sources_used:
-                    sources_used.append(src)
-
+                
+    if field == "phones":
+        unique_phones = []
+        seen_10 = set()
+        # Prefer +91 if there's a collision
+        for v in sorted(result, key=lambda x: not str(x).startswith("+91")):
+            last_10 = str(v)[-10:]
+            if last_10 not in seen_10:
+                seen_10.add(last_10)
+                unique_phones.append(v)
+        result = unique_phones
+                
     if result:
-        for src in sources_used:
-            provenance.append(_prov(field, src, "union_list"))
+        # Generate provenance for each unique value, citing all sources
+        for v in result:
+            sources = val_to_sources[v]
+            # Log the primary source (the first one) in the official provenance entry
+            # The full list is used later for confidence scoring
+            primary_src = sources[0]
+            method = "resume_keyword" if _source_type(primary_src) == "unstructured" else _method_for_source(primary_src)
+            provenance.append(_prov(field, v, primary_src, method))
 
-    return result
+    return result, val_to_sources
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +183,7 @@ def _merge_scalar_field(
     ]
 
     if not candidates:
-        provenance.append(_prov(field, "none", "default"))
+        provenance.append(_prov(field, None, "none", "default"))
         return None
 
     # Deduplicate values (keep first occurrence per unique value)
@@ -172,7 +192,7 @@ def _merge_scalar_field(
     if len(unique_values) == 1:
         # No conflict — all sources agree
         source = candidates[0][1]
-        provenance.append(_prov(field, source, _method_for_source(source)))
+        provenance.append(_prov(field, unique_values[0], source, _method_for_source(source)))
         return unique_values[0]
 
     # Conflict — multiple distinct values
@@ -197,7 +217,7 @@ def _merge_scalar_field(
         "Conflict on field=%r: winner=%r (source=%r, policy=%s) losers=%s",
         field, winner_val, winner_src, policy, losers,
     )
-    provenance.append(_prov(field, winner_src, method))
+    provenance.append(_prov(field, winner_val, winner_src, method))
     return winner_val
 
 
@@ -232,10 +252,10 @@ def _merge_block_field(
         val, src = csv_vals[0]
         method = "csv_direct"
     else:
-        provenance.append(_prov(field, "none", "default"))
+        provenance.append(_prov(field, None, "none", "default"))
         return []
 
-    provenance.append(_prov(field, src, method))
+    provenance.append(_prov(field, None, src, method))
     return val if isinstance(val, list) else []
 
 
@@ -264,7 +284,7 @@ def _merge_links(
             if val and links[field] is None:
                 links[field] = val
                 src = d.get("_source", "unknown")
-                provenance.append(_prov(f"links.{field}", src, _method_for_source(src)))
+                provenance.append(_prov(f"links.{field}", val, src, _method_for_source(src)))
                 break
 
     return links
@@ -302,15 +322,21 @@ def merge_cluster(cluster: list[dict[str, Any]]) -> dict[str, Any]:
         for field in ("full_name", "location_city", "location_region",
                       "location_country", "headline", "years_experience"):
             if d.get(field) is not None:
-                provenance.append(_prov(field, src, _method_for_source(src)))
+                provenance.append(_prov(field, d.get(field), src, _method_for_source(src)))
 
-        for field in ("emails", "phones", "skills"):
+        for field in ("emails", "phones"):
             if d.get(field):
-                provenance.append(_prov(field, src, "union_list"))
+                for v in (d.get(field) if isinstance(d.get(field), list) else [d.get(field)]):
+                    provenance.append(_prov(field, v, src, _method_for_source(src)))
+                    
+        if d.get("skills"):
+            for v in (d.get("skills") if isinstance(d.get("skills"), list) else [d.get("skills")]):
+                method = "resume_keyword" if _source_type(src) == "unstructured" else _method_for_source(src)
+                provenance.append(_prov("skills", v, src, method))
 
         for block in ("experience", "education"):
             if d.get(block):
-                provenance.append(_prov(block, src, _method_for_source(src)))
+                provenance.append(_prov(block, None, src, _method_for_source(src)))
 
         links = _merge_links([d], provenance)
 
@@ -334,9 +360,9 @@ def merge_cluster(cluster: list[dict[str, Any]]) -> dict[str, Any]:
     provenance: list[dict] = []
 
     # --- List fields (union) ---
-    merged_emails = _merge_list_field("emails", cluster, provenance)
-    merged_phones = _merge_list_field("phones", cluster, provenance)
-    merged_skills = _merge_list_field("skills", cluster, provenance)
+    merged_emails, _ = _merge_list_field("emails", cluster, provenance)
+    merged_phones, _ = _merge_list_field("phones", cluster, provenance)
+    merged_skills, skill_sources = _merge_list_field("skills", cluster, provenance)
 
     # --- Scalar fields (policy table) ---
     full_name        = _merge_scalar_field("full_name",        cluster, provenance)
@@ -347,8 +373,8 @@ def merge_cluster(cluster: list[dict[str, Any]]) -> dict[str, Any]:
     years_exp        = _merge_scalar_field("years_experience", cluster, provenance)
 
     # --- Block fields (resume > csv) ---
-    experience = _merge_block_field("experience", cluster, provenance)
-    education  = _merge_block_field("education",  cluster, provenance)
+    merged_experience = _merge_block_field("experience", cluster, provenance)
+    merged_education  = _merge_block_field("education",  cluster, provenance)
 
     # --- Links (first non-null per sub-field) ---
     links = _merge_links(cluster, provenance)
@@ -366,16 +392,18 @@ def merge_cluster(cluster: list[dict[str, Any]]) -> dict[str, Any]:
         "headline":         headline,
         "years_experience": years_exp,
         "skills":           merged_skills,
-        "experience":       experience,
-        "education":        education,
+        "experience":       merged_experience,
+        "education":        merged_education,
+        "years_experience": years_exp,
         "_merged_sources":  sources,
         "_provenance":      provenance,
+        "_skills_sources":  skill_sources,
     }
 
     logger.info(
         "Merged cluster of %d dicts: name=%r emails=%s skills=%d exp=%d",
         len(cluster), full_name, merged_emails,
-        len(merged_skills), len(experience),
+        len(merged_skills), len(merged_experience),
     )
 
     return merged

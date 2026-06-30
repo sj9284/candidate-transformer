@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 VALID_METHODS = frozenset({
     "csv_direct",
     "regex_extract",
+    "resume_keyword",
     "merge_conflict_csv_won",
     "merge_conflict_resume_won",
     "union_list",

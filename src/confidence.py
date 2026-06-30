@@ -60,6 +60,32 @@ SKILL_BASE_SCORE: dict[int, float] = {
 }
 SKILL_BASE_SCORE_MAX = 0.95   # 3+ sources confirm this skill
 
+# Contact info confidence
+CONTACT_BASE_SCORE = 0.85
+CONTACT_MULTIPLIER = 0.15
+
+# Experience scoring weights
+EXPERIENCE_WEIGHTS = {
+    "base": 0.5,
+    "company": 0.2,
+    "title": 0.15,
+    "dates": 0.15
+}
+
+# Education scoring weights
+EDUCATION_WEIGHTS = {
+    "base": 0.5,
+    "institution": 0.2,
+    "degree": 0.2,
+    "end_year": 0.1
+}
+
+# Skills
+MAX_SKILL_VOLUME_BONUS = 0.05
+
+# Overall weighted average prioritizations
+OVERALL_FIELD_WEIGHTS = [1.5, 1.5, 2.0, 1.0, 1.0] # Email, Phone, Exp, Edu, Skills
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -105,87 +131,26 @@ def _avg(values: list[float]) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Overall confidence
-# ---------------------------------------------------------------------------
-
-def compute_overall_confidence(merged_sources: list[str]) -> float:
-    """
-    Compute the overall_confidence score for a candidate.
-
-    Args:
-        merged_sources: List of source filenames that contributed to
-                        this candidate (from merged_dict["_merged_sources"]).
-                        Duplicates are collapsed before scoring.
-
-    Returns:
-        float in [0.0, 1.0].
-
-    Examples:
-        ["recruiter.csv"]                    → 0.70 × 1.00 = 0.70
-        ["recruiter.csv", "resume.pdf"]      → 0.90 × avg(1.0, 0.85) = 0.8325
-        ["a.csv", "b.csv", "resume.pdf"]     → 0.98 × avg(1.0, 1.0, 0.85) = 0.9408
-    """
-    unique_sources = list(dict.fromkeys(merged_sources))   # stable dedup
-    n = len(unique_sources)
-
-    if n == 0:
-        logger.warning("compute_overall_confidence called with empty source list")
-        return 0.0
-
-    weights = [_weight(s) for s in unique_sources]
-    score = _base_score(n) * _avg(weights)
-    result = _clamp(round(score, 4))
-
-    logger.debug(
-        "overall_confidence: sources=%s base=%.2f avg_weight=%.4f result=%.4f",
-        unique_sources, _base_score(n), _avg(weights), result,
-    )
-
-    return result
-
-
-# ---------------------------------------------------------------------------
 # Per-skill confidence
 # ---------------------------------------------------------------------------
 
 def compute_skill_confidence(skill_name: str, sources: list[str]) -> float:
     """
     Compute the confidence score for one skill.
-
-    Args:
-        skill_name: Canonical skill name (used only for logging).
-        sources:    List of source filenames that mentioned this skill.
-                    May contain duplicates — they are collapsed.
-
-    Returns:
-        float in [0.0, 1.0].
-
-    Examples:
-        skill="python", sources=["recruiter.csv"]
-            → 0.70 × 1.0 = 0.70
-
-        skill="python", sources=["recruiter.csv", "resume.pdf"]
-            → 0.90 × avg(1.0, 0.85) = 0.8325
-
-        skill="go", sources=["resume.pdf"]
-            → 0.70 × 0.85 = 0.595
     """
     unique_sources = list(dict.fromkeys(sources))
-    n = len(unique_sources)
-
-    if n == 0:
+    if not unique_sources:
         return 0.0
 
-    weights = [_weight(s) for s in unique_sources]
-    score = _skill_base_score(n) * _avg(weights)
-    result = _clamp(round(score, 4))
+    base = _skill_base_score(len(unique_sources))
+    weight = _avg([_weight(s) for s in unique_sources])
+    confidence = base * weight
 
     logger.debug(
         "skill_confidence: skill=%r sources=%s result=%.4f",
-        skill_name, unique_sources, result,
+        skill_name, unique_sources, confidence,
     )
-
-    return result
+    return round(confidence, 4)
 
 
 # ---------------------------------------------------------------------------
@@ -248,15 +213,93 @@ def score_merged_dict(merged: dict[str, Any]) -> dict[str, Any]:
     Returns:
         The same dict with confidence fields populated.
     """
-    sources = merged.get("_merged_sources", [])
-
-    merged["overall_confidence"] = compute_overall_confidence(sources)
+    # Determine source list
+    sources = merged.get("_merged_sources") or []
 
     # Convert flat skill name list → enriched skill dicts
     skill_names = merged.get("skills", [])
+    skill_sources = merged.get("_skills_sources", {})
     if skill_names and isinstance(skill_names[0], str):
-        merged["skills"] = enrich_skills_with_confidence(skill_names, sources)
-    # If already enriched (list of dicts), leave as-is.
+        merged["skills"] = enrich_skills_with_confidence(skill_names, sources, skill_sources)
+
+    # Calculate overall confidence dynamically based on data completeness
+    field_scores = []
+    
+    # 1. Email confidence
+    if merged.get("emails"):
+        email_score = min(1.0, CONTACT_BASE_SCORE + (len(merged["emails"]) - 1) * CONTACT_MULTIPLIER)
+        field_scores.append(email_score)
+    else:
+        field_scores.append(0.0)
+        
+    # 2. Phone confidence
+    if merged.get("phones"):
+        phone_score = min(1.0, CONTACT_BASE_SCORE + (len(merged["phones"]) - 1) * CONTACT_MULTIPLIER)
+        field_scores.append(phone_score)
+    else:
+        field_scores.append(0.0)
+        
+    # 3. Experience confidence (based on completeness of entries)
+    exp_list = merged.get("experience", [])
+    if exp_list:
+        entry_scores = []
+        for exp in exp_list:
+            score = EXPERIENCE_WEIGHTS["base"]
+            if exp.get("company"): score += EXPERIENCE_WEIGHTS["company"]
+            if exp.get("title"): score += EXPERIENCE_WEIGHTS["title"]
+            if exp.get("start") and exp.get("end"): score += EXPERIENCE_WEIGHTS["dates"]
+            entry_scores.append(score)
+        avg_exp = sum(entry_scores) / len(entry_scores)
+        field_scores.append(avg_exp)
+    else:
+        field_scores.append(0.3)
+        
+    # 4. Education confidence (based on completeness of entries)
+    edu_list = merged.get("education", [])
+    if edu_list:
+        entry_scores = []
+        for edu in edu_list:
+            score = EDUCATION_WEIGHTS["base"]
+            if edu.get("institution"): score += EDUCATION_WEIGHTS["institution"]
+            if edu.get("degree"): score += EDUCATION_WEIGHTS["degree"]
+            if edu.get("end_year"): score += EDUCATION_WEIGHTS["end_year"]
+            entry_scores.append(score)
+        avg_edu = sum(entry_scores) / len(entry_scores)
+        field_scores.append(avg_edu)
+    else:
+        field_scores.append(0.3)
+        
+    # 5. Skills confidence (based on volume and average skill confidence)
+    if merged.get("skills"):
+        skill_count = len(merged["skills"])
+        avg_skill = sum(s.get("confidence", 0.82) for s in merged["skills"]) / skill_count
+        volume_boost = min(MAX_SKILL_VOLUME_BONUS, (skill_count / 10) * MAX_SKILL_VOLUME_BONUS)
+        field_scores.append(min(1.0, avg_skill + volume_boost))
+    else:
+        field_scores.append(0.3)
+
+    # Set overall_confidence (weighted average prioritizing contact info and experience)
+    weighted_sum = sum(s * w for s, w in zip(field_scores, OVERALL_FIELD_WEIGHTS))
+    merged["overall_confidence"] = round(weighted_sum / sum(OVERALL_FIELD_WEIGHTS), 4)
+
+    # Enrich provenance entries with confidence
+    provenance = merged.get("_provenance", [])
+    for p in provenance:
+        if p["field"] == "skills":
+            # Lookup specific skill confidence
+            val = p.get("value")
+            skill_conf = next((s["confidence"] for s in merged.get("skills", []) if s.get("name") == val), None)
+            if skill_conf is not None:
+                p["confidence"] = skill_conf
+            else:
+                p["confidence"] = compute_skill_confidence(str(val), [p["source"]])
+        else:
+            # Use source-specific base confidence for other fields
+            src = p.get("source", "")
+            if src == "none":
+                p["confidence"] = 0.0
+            else:
+                p["confidence"] = _weight(src)
 
     logger.info(
         "Confidence scored: name=%r overall=%.4f skills=%d sources=%s",
