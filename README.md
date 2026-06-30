@@ -1,18 +1,18 @@
 # Multi-Source Candidate Data Transformer
 
-> Eightfold Engineering Intern Assignment — Jul–Dec 2026
+
 
 ## Overview
-
-A pipeline that ingests candidate information from multiple sources (CSV recruiter export + PDF resume), resolves identity across sources, merges fields using a per-field conflict policy, and emits a clean, validated canonical profile — with full provenance and confidence tracking.
+A pipeline that ingests candidate information from multiple sources (CSV recruiter export + PDF resumes), resolves identity across those sources, merges fields using a per-field conflict policy, and emits a clean, validated canonical profile in JSON format — complete with full provenance tracking and dynamic confidence scoring.
 
 **Core principle:** Wrong-but-confident is worse than honestly-empty. Unknown values become `null`, never invented.
 
----
+## Requirements
+- **OS:** Windows / macOS / Linux
+- **Python:** Python 3.10+
+- **Memory:** 512MB RAM minimum
 
-## How to Run
-
-### 1. Setup
+## Installation
 
 ```bash
 # Clone the repo
@@ -21,6 +21,7 @@ cd candidate-transformer
 
 # Create and activate virtual environment
 python -m venv venv
+
 # Windows:
 venv\Scripts\activate
 # macOS/Linux:
@@ -30,160 +31,128 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Run the pipeline
-
-```bash
-# Default full-schema output (all canonical fields)
-python main.py --csv input/recruiter.csv --resume input/resume.pdf --output output/result.json
-
-# Custom projection via config
-python main.py --csv input/recruiter.csv --resume input/resume.pdf \
-  --config configs/custom_projection.json --output output/result_custom.json
-
-# Print to stdout (omit --output)
-python main.py --csv input/recruiter.csv --resume input/resume.pdf
-```
-
-### 3. Run tests
-
-```bash
-pytest tests/ -v
-pytest tests/ -v --cov=src   # with coverage
-```
-
----
-
 ## Project Structure
 
 ```
 candidate-transformer/
 ├── input/
-│   ├── recruiter.csv          # Structured source (4 candidate rows, see design notes)
-│   └── resume.pdf             # Unstructured source (matches row 1 candidate)
+│   ├── recruiter.csv          
+│   ├── resume_shubham.pdf    
+│   ├── resume_alice.pdf       
+│   ├── resume_bob.pdf         
+│   └── resume_charlie.pdf    
 ├── configs/
-│   ├── default_projection.json    # Full schema, no remapping
-│   └── custom_projection.json     # Field selection + remapping + normalization override
-├── output/                        # Git-ignored, created at runtime
+│   ├── default_projection.json    
+│   └── custom_projection.json     
+├── output/                        
 ├── src/
-│   ├── parsers/
-│   │   ├── csv_parser.py          # Phase 3: structured CSV reader
-│   │   └── resume_parser.py       # Phase 4: PDF text extractor + regex parser
-│   ├── canonical_schema.py        # Phase 2: Pydantic models
-│   ├── normalizer.py              # Phase 5: pure normalization functions
-│   ├── validator.py               # Phase 6: input-side field validator
-│   ├── matcher.py                 # Phase 6.5: identity resolution / clustering
-│   ├── merger.py                  # Phase 7: per-field conflict merge engine
-│   ├── confidence.py              # Phase 8: confidence scoring
-│   ├── provenance.py              # Phase 9: provenance tracking
-│   ├── profile_builder.py         # Phase 10: assemble canonical CandidateProfile
-│   ├── projector.py               # Phase 11: config-driven projection layer
-│   └── output_validator.py        # Phase 11.5: output-side schema validator
-├── tests/
-│   ├── test_normalizer.py
-│   ├── test_matcher.py
-│   ├── test_merger.py
-│   ├── test_projector.py
-│   └── test_output_validator.py
-├── main.py                        # Phase 12: CLI entry point
-├── requirements.txt
-└── README.md
+│   ├── parsers/               
+│   ├── canonical_schema.py    
+│   ├── normalizer.py         
+│   ├── validator.py         
+│   ├── matcher.py             
+│   ├── merger.py            
+│   ├── confidence.py         
+│   ├── provenance.py         
+│   ├── profile_builder.py     
+│   ├── projector.py          
+│   └── output_validator.py   
+├── tests/                    
+├── main.py                    
+└── requirements.txt
 ```
 
----
+## Input Format
 
-## Pipeline Steps
+1. **CSV (Structured Data):** Expects standard headers like `candidate_name`, `email`, `phone`, `current_company`, `location_city`, etc. Mock data can contain incomplete fields.
+2. **PDF Resumes (Unstructured Data):** Standard text-based PDF files. The pipeline uses `pdfminer.six` and Regex heuristics to parse headlines, experience, education, skills, and contact info.
 
-1. **Parse** — CSV parser and resume parser each emit raw dicts tagged with `{"_source": "<filename>"}`. No normalization at this stage.
-2. **Normalize** — Pure functions convert phones to E.164, emails to lowercase, dates to YYYY-MM, skills to canonical names, countries to ISO-3166 alpha-2.
-3. **Validate** — Invalid values are set to `None` and logged. Pipeline never crashes on bad data.
-4. **Identity Resolution** — Groups raw dicts from multiple sources into clusters representing the same person. Primary key: normalized email (exact). Fallback: fuzzy name similarity ≥ 85 AND phone overlap.
-5. **Merge** — Per-field conflict policy (see table below) combines each cluster into one dict. List fields are unioned and deduplicated.
-6. **Confidence** — Overall score = `base_score(source_count) × avg(source_reliability_weights)`. Per-skill confidence computed separately.
-7. **Provenance** — Every field write records: field name, winning source, method (e.g. `merge_conflict_csv_won`).
-8. **Build Canonical Profile** — Merged dict → `CandidateProfile(**data)` via Pydantic. This is the single validated source of truth.
-9. **Project** — Config-driven transformation: path resolution, per-field re-normalization, `on_missing` handling, confidence/provenance toggles.
-10. **Validate Output** — Checks projected JSON against config (required fields, type declarations). Aborts write only on `required: true` violations.
+## Running the Project
 
----
+**Default full-schema output (all canonical fields):**
+```bash
+python main.py --csv input/recruiter.csv --resume input/resume_shubham.pdf input/resume_alice.pdf input/resume_bob.pdf input/resume_charlie.pdf --output output/result.json
+```
 
-## Per-Field Conflict Resolution Policy
+**Custom projection via config:**
+```bash
+python main.py --csv input/recruiter.csv --resume input/resume_shubham.pdf input/resume_alice.pdf input/resume_bob.pdf input/resume_charlie.pdf --config configs/custom_projection.json --output output/result.json
+```
 
-| Field | Preferred Source | Rationale |
-|-------|-----------------|-----------|
-| `emails` | Union of all | List field — keep all, deduplicate |
-| `phones` | Union of all | List field — keep all, deduplicate |
-| `full_name` | CSV, fallback resume | Recruiter-verified spelling |
-| `location` | Whichever present; CSV wins on conflict | Rarely conflicts |
-| `headline` | Resume | Usually absent from CSV |
-| `years_experience` | Resume, fallback CSV | Resume has richer date context |
-| `skills` | Union (resume enriches, CSV anchors) | List field — union + deduplicate |
-| `experience` | Resume | Richer unstructured detail |
-| `education` | Resume | Richer unstructured detail |
-| `links` | Union (each sub-field: first non-null wins) | Different sources have different links |
+**Print to stdout (omit --output):**
+```bash
+python main.py --csv input/recruiter.csv --resume input/resume_shubham.pdf input/resume_alice.pdf input/resume_bob.pdf input/resume_charlie.pdf
+```
 
----
+## Sample Run
+```
+03:40:25 INFO     __main__: Starting pipeline ...
+03:40:25 INFO     __main__: Phase 3: Parsing CSV - input/recruiter.csv
+03:40:25 INFO     __main__: Phase 4: Parsing resume - input/resume_shubham.pdf
+...
+03:40:26 INFO     __main__: Phase 6.5: Resolving identity across 8 dict(s)
+03:40:26 INFO     src.matcher: Merged: [3]'Shubham Jain' + [4]'Shubham Jain' via email_exact
+03:40:26 INFO     __main__: Phase 7: Merging 7 cluster(s)
+03:40:26 INFO     __main__: Phase 8: Scoring confidence
+03:40:26 INFO     src.confidence: Confidence scored: name='Shubham Jain' overall=0.9117 skills=22 sources=['input/recruiter.csv', 'input/resume_shubham.pdf']
+03:40:26 INFO     __main__: Phase 11: Projecting output (config=default)
+03:40:26 INFO     __main__: Output written to output/result.json
+03:40:26 INFO     __main__: Pipeline complete - 7 candidate(s) processed.
+```
 
-## Identity Resolution Policy
+## Sample Output (Default Configuration)
+```json
+{
+  "candidate_id": "1b58d15fa067ba52",
+  "full_name": "Shubham Jain",
+  "headline": "Research Intern (Scientific Analysis Group)",
+  "emails": ["shubhamjain9313.sjsj.sjsj@gmail.com"],
+  "phones": ["+918595606855"],
+  "overall_confidence": 0.9117,
+  "skills": [
+    {
+      "name": "python",
+      "confidence": 0.98,
+      "sources": ["input/recruiter.csv", "input/resume_shubham.pdf"]
+    }
+  ],
+  "experience": [
+    {
+      "company": "Defence Research And Development Organisation",
+      "title": "Research Intern (Scientific Analysis Group)",
+      "start": "2025-06",
+      "end": "2025-07",
+      "summary": "Built an AI-powered research paper search engine..."
+    }
+  ],
+  "provenance": [
+    {
+      "field": "full_name",
+      "value": "Shubham Jain",
+      "source": "input/recruiter.csv",
+      "method": "merge_conflict_csv_won",
+      "confidence": 1.0
+    }
+  ]
+}
+```
 
-- **Primary key:** Exact match on normalized email. If any email from source A matches any email from source B, they merge.
-- **Fallback:** `rapidfuzz.fuzz.token_sort_ratio(name_A, name_B) ≥ 85` **AND** phone sets overlap.
-- **Threshold rationale:** 85 covers common typos and abbreviations (Jon/John, Rob/Robert) without false-merging candidates with common names like "John Lee" and "John Li". Phone is required in the fallback to reduce false positive rate.
-- **No match:** Treated as a separate candidate. No force-merging.
+## Output Files
+- The pipeline dumps a structured JSON array into the path defined by the `--output` flag (e.g., `output/result.json`).
+- If no output path is provided, it prints the JSON array directly to standard output.
 
----
+## Running the Tests
 
-## `candidate_id` Generation
+To verify that the normalization, merging, and projection logic work exactly as intended:
+```bash
+# Run unit test suite
+pytest tests/ -v
 
-`candidate_id = sha256(normalized_primary_email)[:16]`
+# Run with coverage report
+pytest tests/ -v --cov=src
+```
 
-If no email is available: `sha256(normalized_full_name + normalized_primary_phone)[:16]`
-
-**Determinism guarantee:** Same inputs always produce the same `candidate_id`. UUID4 is deliberately not used.
-
----
-
-## Normalization Formats
-
-| Field | Format |
-|-------|--------|
-| Phone | E.164 (`+14155552671`) |
-| Email | lowercase, stripped |
-| Country | ISO-3166 alpha-2 (`US`, `IN`) |
-| Dates | YYYY-MM (`2023-04`) |
-| Skills | Canonical lowercase name (synonym mapping applied) |
-
----
-
-## Known Limitations
-
-- Resume PDF extraction uses regex on section headers — accuracy depends on PDF formatting. Non-standard resume layouts may yield incomplete data.
-- `years_experience` extracted from resume by summing date ranges in experience blocks. Best-effort; may be `None` for unusual date formats.
-- ATS JSON blob, GitHub profile URL, LinkedIn profile URL parsers are **descoped** (see below).
-
----
-
-## Descoped Items
-
-The following were listed as options in the brief but were deliberately excluded to stay within scope:
-- ATS JSON blob parser
-- GitHub profile URL fetcher
-- LinkedIn profile URL parser
-- Recruiter notes (.txt) parser
-
-The minimum requirement of **1 structured source (CSV) + 1 unstructured source (resume PDF)** is fully met.
-
----
-
-## Sample Output
-
-*(Populated after Phase 12 — will be added here)*
-
----
-
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | Pipeline error (logged to stderr) |
-| 2 | Bad arguments |
+## Notes
+- **Identity Resolution**: Candidates are merged primarily using exact normalized email matches. The fallback logic checks fuzzy name similarity (≥ 85%) combined with phone number overlaps.
+- **Determinism**: Candidate IDs are generated using a stable SHA-256 hash of the normalized email (or phone fallback), guaranteeing the same candidate always receives the same ID on subsequent runs.
+- **Dynamic Confidence**: The confidence scoring engine is fully dynamic. It checks the completeness of Experience and Education fields, contact information volume, and rewards multiple sources corroborating the same skill.
