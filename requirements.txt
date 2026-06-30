@@ -1,0 +1,6 @@
+pydantic>=2.0
+pdfminer.six>=20221105
+rapidfuzz>=3.0
+phonenumbers>=8.13
+pytest>=7.0
+pytest-cov>=4.0
