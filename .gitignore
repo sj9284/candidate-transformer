@@ -16,7 +16,11 @@ env/
 # Output (runtime generated)
 input/*
 !input/.gitkeep
+!input/recruiter/
+input/recruiter/*
 !input/recruiter/.gitkeep
+!input/resume/
+input/resume/*
 !input/resume/.gitkeep
 output/*
 !output/.gitkeep
