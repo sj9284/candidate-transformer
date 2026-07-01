@@ -160,3 +160,4 @@ pytest tests/ -v --cov=src
 - **Identity Resolution**: Candidates are merged primarily using exact normalized email matches. The fallback logic checks fuzzy name similarity (≥ 85%) combined with phone number overlaps.
 - **Determinism**: Candidate IDs are generated using a stable SHA-256 hash of the normalized email (or phone fallback), guaranteeing the same candidate always receives the same ID on subsequent runs.
 - **Dynamic Confidence**: The confidence scoring engine is fully dynamic. It checks the completeness of Experience and Education fields, contact information volume, and rewards multiple sources corroborating the same skill.
+- **Git Directory Structure**: Empty runtime directories (`input/recruiter`, `input/resume`, and `output`) are preserved in version control using `.gitkeep` files while ignoring actual data contents.
