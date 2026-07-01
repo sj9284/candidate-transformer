@@ -124,8 +124,8 @@ def full_profiles():
     from src.confidence import score_merged_dict
     from src.profile_builder import build_all
 
-    csv_rows   = validate_all(parse_csv("input/recruiter.csv"))
-    resume_row = validate_dict(parse_resume("input/resume.pdf"))
+    csv_rows   = validate_all(parse_csv("input/recruiter/recruiter.csv"))
+    resume_row = validate_dict(parse_resume("input/resume/resume_shubham.pdf"))
     clusters   = cluster_candidates(csv_rows + [resume_row])
     merged     = merge_all(clusters)
     for m in merged:

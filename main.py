@@ -88,14 +88,15 @@ examples:
 
     parser.add_argument(
         "--csv",
-        metavar="FILE",
-        help="Path to recruiter CSV file (structured source).",
+        metavar="PATH",
+        nargs="+",
+        help="Path to one or more recruiter CSV files or directories (structured source).",
     )
     parser.add_argument(
         "--resume",
-        metavar="FILE",
+        metavar="PATH",
         nargs="+",
-        help="Path to one or more resume PDF files (unstructured source).",
+        help="Path to one or more resume PDF files or directories (unstructured source).",
     )
     parser.add_argument(
         "--config",
@@ -129,11 +130,43 @@ examples:
 
 
 # ---------------------------------------------------------------------------
+# Path helper
+# ---------------------------------------------------------------------------
+
+def _expand_paths(paths: list[str] | str | None, valid_extensions: tuple[str, ...]) -> list[str]:
+    """Expand file or directory paths into sorted lists of matching files."""
+    if not paths:
+        return []
+    if isinstance(paths, str):
+        paths = [paths]
+
+    expanded: list[str] = []
+    for p in paths:
+        if os.path.isdir(p):
+            for root, _, files in os.walk(p):
+                for f in sorted(files):
+                    if f.lower().endswith(valid_extensions):
+                        expanded.append(os.path.normpath(os.path.join(root, f)))
+        elif os.path.isfile(p):
+            expanded.append(os.path.normpath(p))
+        else:
+            logger.warning("Path not found or invalid: %s", p)
+
+    seen = set()
+    result = []
+    for p in expanded:
+        if p not in seen:
+            seen.add(p)
+            result.append(p)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Pipeline runner
 # ---------------------------------------------------------------------------
 
 def run_pipeline(
-    csv_path: str | None,
+    csv_path: list[str] | str | None,
     resume_path: list[str] | str | None,
     config_path: str | None,
 ) -> list[dict[str, Any]]:
@@ -141,8 +174,8 @@ def run_pipeline(
     Execute the full transformation pipeline.
 
     Args:
-        csv_path:     Path to recruiter CSV, or None to skip.
-        resume_path:  Path to one or more resume PDFs, or None to skip.
+        csv_path:     Path to recruiter CSV(s) or folder(s), or None to skip.
+        resume_path:  Path to one or more resume PDFs or folder(s), or None to skip.
         config_path:  Path to projection config, or None for default.
 
     Returns:
@@ -167,17 +200,19 @@ def run_pipeline(
     # ------------------------------------------------------------------
     raw_dicts: list[dict] = []
 
-    if csv_path:
-        logger.info("Phase 3: Parsing CSV — %s", csv_path)
-        csv_rows = parse_csv(csv_path)
-        logger.info("  %d row(s) loaded", len(csv_rows))
-        raw_dicts.extend(csv_rows)
+    csv_files = _expand_paths(csv_path, (".csv",))
+    if csv_files:
+        for path in csv_files:
+            logger.info("Phase 3: Parsing CSV — %s", path)
+            csv_rows = parse_csv(path)
+            logger.info("  %d row(s) loaded from %s", len(csv_rows), path)
+            raw_dicts.extend(csv_rows)
     else:
         logger.info("Phase 3: No CSV provided — skipping")
 
-    if resume_path:
-        resume_paths = [resume_path] if isinstance(resume_path, str) else resume_path
-        for path in resume_paths:
+    resume_files = _expand_paths(resume_path, (".pdf",))
+    if resume_files:
+        for path in resume_files:
             logger.info("Phase 4: Parsing resume — %s", path)
             resume_dict = parse_resume(path)
             if resume_dict.get("full_name") or resume_dict.get("emails"):

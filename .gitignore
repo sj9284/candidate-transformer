@@ -16,6 +16,8 @@ env/
 # Output (runtime generated)
 input/*
 !input/.gitkeep
+!input/recruiter/.gitkeep
+!input/resume/.gitkeep
 output/*
 !output/.gitkeep
 # IDE

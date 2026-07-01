@@ -36,11 +36,13 @@ pip install -r requirements.txt
 ```
 candidate-transformer/
 ├── input/
-│   ├── recruiter.csv          
-│   ├── resume_shubham.pdf    
-│   ├── resume_alice.pdf       
-│   ├── resume_bob.pdf         
-│   └── resume_charlie.pdf    
+│   ├── recruiter/
+│   │   └── recruiter.csv          
+│   └── resume/
+│       ├── resume_shubham.pdf    
+│       ├── resume_alice.pdf       
+│       ├── resume_bob.pdf         
+│       └── resume_charlie.pdf    
 ├── configs/
 │   ├── default_projection.json    
 │   └── custom_projection.json     
@@ -64,37 +66,39 @@ candidate-transformer/
 
 ## Input Format
 
-1. **CSV (Structured Data):** Expects standard headers like `candidate_name`, `email`, `phone`, `current_company`, `location_city`, etc. Mock data can contain incomplete fields.
-2. **PDF Resumes (Unstructured Data):** Standard text-based PDF files. The pipeline uses `pdfminer.six` and Regex heuristics to parse headlines, experience, education, skills, and contact info.
+1. **CSV (Structured Data):** Expects standard headers like `candidate_name`, `email`, `phone`, `current_company`, `location_city`, etc. Mock data can contain incomplete fields. Placed inside `input/recruiter/`.
+2. **PDF Resumes (Unstructured Data):** Standard text-based PDF files. The pipeline uses `pdfminer.six` and Regex heuristics to parse headlines, experience, education, skills, and contact info. Placed inside `input/resume/`.
 
 ## Running the Project
 
+You can pass entire folders (or specific file paths) to `--csv` and `--resume` to automatically process all files inside them:
+
 **Default full-schema output (all canonical fields):**
 ```bash
-python main.py --csv input/recruiter.csv --resume input/resume_shubham.pdf input/resume_alice.pdf input/resume_bob.pdf input/resume_charlie.pdf --output output/result.json
+python main.py --csv input/recruiter --resume input/resume --output output/result.json
 ```
 
 **Custom projection via config:**
 ```bash
-python main.py --csv input/recruiter.csv --resume input/resume_shubham.pdf input/resume_alice.pdf input/resume_bob.pdf input/resume_charlie.pdf --config configs/custom_projection.json --output output/result.json
+python main.py --csv input/recruiter --resume input/resume --config configs/custom_projection.json --output output/result.json
 ```
 
 **Print to stdout (omit --output):**
 ```bash
-python main.py --csv input/recruiter.csv --resume input/resume_shubham.pdf input/resume_alice.pdf input/resume_bob.pdf input/resume_charlie.pdf
+python main.py --csv input/recruiter --resume input/resume
 ```
 
 ## Sample Run
 ```
 03:40:25 INFO     __main__: Starting pipeline ...
-03:40:25 INFO     __main__: Phase 3: Parsing CSV - input/recruiter.csv
-03:40:25 INFO     __main__: Phase 4: Parsing resume - input/resume_shubham.pdf
+03:40:25 INFO     __main__: Phase 3: Parsing CSV - input/recruiter/recruiter.csv
+03:40:25 INFO     __main__: Phase 4: Parsing resume - input/resume/resume_shubham.pdf
 ...
 03:40:26 INFO     __main__: Phase 6.5: Resolving identity across 8 dict(s)
 03:40:26 INFO     src.matcher: Merged: [3]'Shubham Jain' + [4]'Shubham Jain' via email_exact
 03:40:26 INFO     __main__: Phase 7: Merging 7 cluster(s)
 03:40:26 INFO     __main__: Phase 8: Scoring confidence
-03:40:26 INFO     src.confidence: Confidence scored: name='Shubham Jain' overall=0.9117 skills=22 sources=['input/recruiter.csv', 'input/resume_shubham.pdf']
+03:40:26 INFO     src.confidence: Confidence scored: name='Shubham Jain' overall=0.9117 skills=22 sources=['input/recruiter/recruiter.csv', 'input/resume/resume_shubham.pdf']
 03:40:26 INFO     __main__: Phase 11: Projecting output (config=default)
 03:40:26 INFO     __main__: Output written to output/result.json
 03:40:26 INFO     __main__: Pipeline complete - 7 candidate(s) processed.
@@ -113,7 +117,7 @@ python main.py --csv input/recruiter.csv --resume input/resume_shubham.pdf input
     {
       "name": "python",
       "confidence": 0.98,
-      "sources": ["input/recruiter.csv", "input/resume_shubham.pdf"]
+      "sources": ["input/recruiter/recruiter.csv", "input/resume/resume_shubham.pdf"]
     }
   ],
   "experience": [
@@ -129,7 +133,7 @@ python main.py --csv input/recruiter.csv --resume input/resume_shubham.pdf input
     {
       "field": "full_name",
       "value": "Shubham Jain",
-      "source": "input/recruiter.csv",
+      "source": "input/recruiter/recruiter.csv",
       "method": "merge_conflict_csv_won",
       "confidence": 1.0
     }
